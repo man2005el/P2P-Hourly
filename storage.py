@@ -20,32 +20,36 @@ SCOPES = [
 def obtener_cliente_gspread():
     """
     Obtiene un cliente autenticado de gspread basado en variables de entorno:
-    1. GOOGLE_SERVICE_ACCOUNT_JSON (string JSON completo de la Service Account)
-    2. GOOGLE_SERVICE_ACCOUNT_FILE (ruta a archivo .json)
+    1. GOOGLE_SERVICE_ACCOUNT_FILE (ruta a archivo .json)
+    2. GOOGLE_SERVICE_ACCOUNT_JSON (string JSON completo de la Service Account)
     3. GOOGLE_CREDENTIALS_BASE64 (string JSON codificado en Base64)
     """
     if not GSPREAD_AVAILABLE:
         raise RuntimeError("Las librerías 'gspread' y 'google-auth' no están instaladas.")
 
-    sa_json_str = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON")
     sa_file = os.environ.get("GOOGLE_SERVICE_ACCOUNT_FILE")
+    sa_json_str = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON")
     sa_b64 = os.environ.get("GOOGLE_CREDENTIALS_BASE64")
 
     creds = None
 
-    if sa_json_str:
+    if sa_file and os.path.exists(sa_file):
+        creds = Credentials.from_service_account_file(sa_file, scopes=SCOPES)
+    elif sa_json_str:
         info = json.loads(sa_json_str)
+        if "private_key" in info and isinstance(info["private_key"], str):
+            info["private_key"] = info["private_key"].replace("\\n", "\n")
         creds = Credentials.from_service_account_info(info, scopes=SCOPES)
     elif sa_b64:
         decoded_json = base64.b64decode(sa_b64).decode("utf-8")
         info = json.loads(decoded_json)
+        if "private_key" in info and isinstance(info["private_key"], str):
+            info["private_key"] = info["private_key"].replace("\\n", "\n")
         creds = Credentials.from_service_account_info(info, scopes=SCOPES)
-    elif sa_file and os.path.exists(sa_file):
-        creds = Credentials.from_service_account_file(sa_file, scopes=SCOPES)
     else:
         raise ValueError(
             "No se encontraron credenciales de Google Service Account. "
-            "Configura 'GOOGLE_SERVICE_ACCOUNT_JSON', 'GOOGLE_SERVICE_ACCOUNT_FILE' o 'GOOGLE_CREDENTIALS_BASE64'."
+            "Configura 'GOOGLE_SERVICE_ACCOUNT_FILE', 'GOOGLE_SERVICE_ACCOUNT_JSON' o 'GOOGLE_CREDENTIALS_BASE64'."
         )
 
     return gspread.authorize(creds)
