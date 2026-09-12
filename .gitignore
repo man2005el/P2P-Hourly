@@ -1,0 +1,21 @@
+# Environment variables & secrets
+.env
+.env.local
+.env.*.local
+*.json
+!vercel.json
+
+# Local Python & Virtual Envs
+.venv/
+venv/
+ENV/
+__pycache__/
+*.pyc
+
+# Local Data / CSV files
+*.csv
+
+# IDE / OS files
+.DS_Store
+.vscode/
+.idea/
