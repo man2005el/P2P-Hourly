@@ -3,6 +3,7 @@ import csv
 import time
 import requests
 from datetime import datetime
+from zoneinfo import ZoneInfo
 
 URL_API = "https://p2p.binance.com/bapi/c2c/v2/friendly/c2c/adv/search"
 
@@ -15,23 +16,27 @@ HEADERS = {
 # Configuración de montos y tipos de operaciones
 CONFIG = {
     "VENTA": {
+        "operacion": "VENTA_48K",
         "trade_type": "BUY",      # El usuario compra USDT (tú vendes)
         "amount": 48000,
         "filename": "ventas_48k.csv",
-        "worksheet_name": "ventas_48k",
+        "worksheet_name": "historico_p2p",
         "pay_types": ["Banesco"]
     },
     "RECOMPRA": {
+        "operacion": "RECOMPRA_10K",
         "trade_type": "SELL",     # El usuario vende USDT (tú recompras)
         "amount": 10000,
         "filename": "recompras_10k.csv",
-        "worksheet_name": "recompras_10k",
+        "worksheet_name": "historico_p2p",
         "pay_types": ["Banesco"]
     }
 }
 
 COLUMNAS = [
     "timestamp",
+    "operacion",
+    "trade_type",
     "posicion",
     "comerciante",
     "precio_ves",
@@ -65,10 +70,10 @@ def consultar_anuncios(trade_type: str, amount_ves: float, rows: int = 5, pay_ty
         data = response.json()
         return data.get("data", [])
     except Exception as e:
-        print(f"[{datetime.now()}] Error consultando {trade_type} ({amount_ves} VES): {e}")
+        print(f"[{datetime.now(ZoneInfo('America/Caracas'))}] Error consultando {trade_type} ({amount_ves} VES): {e}")
         return []
 
-def extraer_filas_anuncios(anuncios: list, timestamp_actual: str) -> list:
+def extraer_filas_anuncios(anuncios: list, timestamp_actual: str, tipo_operacion: str, trade_type: str) -> list:
     """Transforma la respuesta cruda de Binance en una lista de filas estructuradas según COLUMNAS."""
     filas = []
     for idx, item in enumerate(anuncios, start=1):
@@ -87,6 +92,8 @@ def extraer_filas_anuncios(anuncios: list, timestamp_actual: str) -> list:
         
         fila = [
             timestamp_actual,
+            tipo_operacion,
+            trade_type,
             idx,
             user.get("nickName", "Desconocido"),
             precio,
@@ -105,7 +112,7 @@ def capturar_datos_p2p(timestamp_actual: str = None) -> dict:
     Ejecuta las consultas P2P para VENTA y RECOMPRA y retorna un diccionario con las filas capturadas.
     """
     if not timestamp_actual:
-        timestamp_actual = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        timestamp_actual = datetime.now(ZoneInfo("America/Caracas")).strftime("%Y-%m-%d %H:%M:%S")
 
     resultados = {
         "timestamp": timestamp_actual,
@@ -120,11 +127,14 @@ def capturar_datos_p2p(timestamp_actual: str = None) -> dict:
         rows=5,
         pay_types=CONFIG["VENTA"]["pay_types"]
     )
-    filas_venta = extraer_filas_anuncios(anuncios_venta, timestamp_actual)
+    filas_venta = extraer_filas_anuncios(
+        anuncios_venta,
+        timestamp_actual,
+        CONFIG["VENTA"]["operacion"],
+        CONFIG["VENTA"]["trade_type"]
+    )
     resultados["datos"]["VENTA"] = filas_venta
     resultados["resumen"]["VENTA_count"] = len(filas_venta)
-
-    time.sleep(1)  # Pausa respetuosa entre peticiones
 
     # Captura RECOMPRA (10k)
     anuncios_recompra = consultar_anuncios(
@@ -133,7 +143,12 @@ def capturar_datos_p2p(timestamp_actual: str = None) -> dict:
         rows=5,
         pay_types=CONFIG["RECOMPRA"]["pay_types"]
     )
-    filas_recompra = extraer_filas_anuncios(anuncios_recompra, timestamp_actual)
+    filas_recompra = extraer_filas_anuncios(
+        anuncios_recompra,
+        timestamp_actual,
+        CONFIG["RECOMPRA"]["operacion"],
+        CONFIG["RECOMPRA"]["trade_type"]
+    )
     resultados["datos"]["RECOMPRA"] = filas_recompra
     resultados["resumen"]["RECOMPRA_count"] = len(filas_recompra)
 
@@ -157,7 +172,7 @@ def guardar_csv_local(filename: str, filas: list):
 
 def ejecutar_captura_local():
     """Ejecución local por línea de comandos (guarda en archivos CSV locales)."""
-    ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    ts = datetime.now(ZoneInfo("America/Caracas")).strftime("%Y-%m-%d %H:%M:%S")
     res = capturar_datos_p2p(ts)
     
     guardar_csv_local(CONFIG["VENTA"]["filename"], res["datos"]["VENTA"])
@@ -175,10 +190,10 @@ if __name__ == "__main__":
                 intervalo = int(sys.argv[i + 1])
         
         minutos = intervalo // 60 if intervalo >= 60 else round(intervalo / 60, 2)
-        print(f"[{datetime.now()}] Iniciando ejecucion continua cada {minutos} min ({intervalo} s). Presiona Ctrl+C para salir.")
+        print(f"[{datetime.now(ZoneInfo('America/Caracas'))}] Iniciando ejecucion continua cada {minutos} min ({intervalo} s). Presiona Ctrl+C para salir.")
         while True:
             ejecutar_captura_local()
-            print(f"[{datetime.now()}] Proxima captura en {minutos} min. Esperando...\n")
+            print(f"[{datetime.now(ZoneInfo('America/Caracas'))}] Proxima captura en {minutos} min. Esperando...\n")
             time.sleep(intervalo)
     else:
         ejecutar_captura_local()
