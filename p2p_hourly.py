@@ -13,23 +13,47 @@ HEADERS = {
     "Accept": "*/*"
 }
 
-# Configuración de montos y tipos de operaciones
+# Configuración de mercados, montos y tipos de operaciones
 CONFIG = {
-    "VENTA": {
-        "operacion": "VENTA_48K",
-        "trade_type": "BUY",      # El usuario compra USDT (tú vendes)
-        "amount": 48000,
-        "filename": "ventas_48k.csv",
+    "VES": {
         "worksheet_name": "historico_p2p",
-        "pay_types": ["Banesco"]
+        "filename": "historico_p2p.csv",
+        "VENTA": {
+            "operacion": "VENTA",
+            "fiat": "VES",
+            "trade_type": "BUY",      # El usuario compra USDT (tú vendes)
+            "amount": 285000,          # 30% de 950.000 VES
+            "pay_types": [],
+            "rows": 5
+        },
+        "RECOMPRA": {
+            "operacion": "RECOMPRA",
+            "fiat": "VES",
+            "trade_type": "SELL",     # El usuario vende USDT (tú recompras)
+            "amount": 142500,          # 15% de 950.000 VES
+            "pay_types": [],
+            "rows": 5
+        }
     },
-    "RECOMPRA": {
-        "operacion": "RECOMPRA_10K",
-        "trade_type": "SELL",     # El usuario vende USDT (tú recompras)
-        "amount": 10000,
-        "filename": "recompras_10k.csv",
-        "worksheet_name": "historico_p2p",
-        "pay_types": ["Banesco"]
+    "ZINLI": {
+        "worksheet_name": "historico_p2p_zinli",
+        "filename": "historico_p2p_zinli.csv",
+        "VENTA": {
+            "operacion": "VENTA",
+            "fiat": "USD",
+            "trade_type": "BUY",      # El usuario compra USDT (tú vendes)
+            "amount": 300,             # 30% de 1.000 USD
+            "pay_types": ["Zinli"],
+            "rows": 5
+        },
+        "RECOMPRA": {
+            "operacion": "RECOMPRA",
+            "fiat": "USD",
+            "trade_type": "SELL",     # El usuario vende USDT (tú recompras)
+            "amount": 150,             # 15% de 1.000 USD
+            "pay_types": ["Zinli"],
+            "rows": 5
+        }
     }
 }
 
@@ -48,16 +72,16 @@ COLUMNAS = [
     "tasa_finalizacion_pct"
 ]
 
-def consultar_anuncios(trade_type: str, amount_ves: float, rows: int = 5, pay_types: list = None):
-    """Consulta la API de Binance P2P para un tipo de operación, monto y métodos de pago específicos."""
+def consultar_anuncios(fiat: str, trade_type: str, amount: float, rows: int = 5, pay_types: list = None):
+    """Consulta la API de Binance P2P para un mercado (fiat), tipo de operación, monto y métodos de pago específicos."""
     if pay_types is None:
-        pay_types = ["Banesco"]
+        pay_types = []
 
     payload = {
         "asset": "USDT",
-        "fiat": "VES",
+        "fiat": fiat,
         "tradeType": trade_type,
-        "transAmount": amount_ves,
+        "transAmount": amount,
         "page": 1,
         "rows": rows,
         "payTypes": pay_types,
@@ -70,7 +94,7 @@ def consultar_anuncios(trade_type: str, amount_ves: float, rows: int = 5, pay_ty
         data = response.json()
         return data.get("data", [])
     except Exception as e:
-        print(f"[{datetime.now(ZoneInfo('America/Caracas'))}] Error consultando {trade_type} ({amount_ves} VES): {e}")
+        print(f"[{datetime.now(ZoneInfo('America/Caracas'))}] Error consultando {fiat} {trade_type} ({amount}): {e}")
         return []
 
 def extraer_filas_anuncios(anuncios: list, timestamp_actual: str, tipo_operacion: str, trade_type: str) -> list:
@@ -109,48 +133,89 @@ def extraer_filas_anuncios(anuncios: list, timestamp_actual: str, tipo_operacion
 
 def capturar_datos_p2p(timestamp_actual: str = None) -> dict:
     """
-    Ejecuta las consultas P2P para VENTA y RECOMPRA y retorna un diccionario con las filas capturadas.
+    Ejecuta las consultas P2P para VENTA y RECOMPRA en el mercado VES y el mercado Zinli (USD),
+    con una pausa de 1.5s entre peticiones Binance para evitar rate-limits.
     """
     if not timestamp_actual:
         timestamp_actual = datetime.now(ZoneInfo("America/Caracas")).strftime("%Y-%m-%d %H:%M:%S")
 
     resultados = {
         "timestamp": timestamp_actual,
-        "datos": {},
-        "resumen": {}
+        "datos": {
+            "ves": {
+                "VENTA": [],
+                "RECOMPRA": []
+            },
+            "zinli": {
+                "VENTA": [],
+                "RECOMPRA": []
+            }
+        },
+        "resumen": {
+            "ves": {"ventas": 0, "recompras": 0},
+            "zinli": {"ventas": 0, "recompras": 0}
+        }
     }
 
-    # Captura VENTA (48k)
-    anuncios_venta = consultar_anuncios(
-        CONFIG["VENTA"]["trade_type"],
-        CONFIG["VENTA"]["amount"],
-        rows=5,
-        pay_types=CONFIG["VENTA"]["pay_types"]
+    # --- Mercado 1: VES ---
+    # Venta VES
+    cfg_ves_v = CONFIG["VES"]["VENTA"]
+    anuncios_ves_v = consultar_anuncios(
+        fiat=cfg_ves_v["fiat"],
+        trade_type=cfg_ves_v["trade_type"],
+        amount=cfg_ves_v["amount"],
+        rows=cfg_ves_v["rows"],
+        pay_types=cfg_ves_v["pay_types"]
     )
-    filas_venta = extraer_filas_anuncios(
-        anuncios_venta,
-        timestamp_actual,
-        CONFIG["VENTA"]["operacion"],
-        CONFIG["VENTA"]["trade_type"]
-    )
-    resultados["datos"]["VENTA"] = filas_venta
-    resultados["resumen"]["VENTA_count"] = len(filas_venta)
+    filas_ves_v = extraer_filas_anuncios(anuncios_ves_v, timestamp_actual, cfg_ves_v["operacion"], cfg_ves_v["trade_type"])
+    resultados["datos"]["ves"]["VENTA"] = filas_ves_v
+    resultados["resumen"]["ves"]["ventas"] = len(filas_ves_v)
 
-    # Captura RECOMPRA (10k)
-    anuncios_recompra = consultar_anuncios(
-        CONFIG["RECOMPRA"]["trade_type"],
-        CONFIG["RECOMPRA"]["amount"],
-        rows=5,
-        pay_types=CONFIG["RECOMPRA"]["pay_types"]
+    time.sleep(1.5)
+
+    # Recompra VES
+    cfg_ves_r = CONFIG["VES"]["RECOMPRA"]
+    anuncios_ves_r = consultar_anuncios(
+        fiat=cfg_ves_r["fiat"],
+        trade_type=cfg_ves_r["trade_type"],
+        amount=cfg_ves_r["amount"],
+        rows=cfg_ves_r["rows"],
+        pay_types=cfg_ves_r["pay_types"]
     )
-    filas_recompra = extraer_filas_anuncios(
-        anuncios_recompra,
-        timestamp_actual,
-        CONFIG["RECOMPRA"]["operacion"],
-        CONFIG["RECOMPRA"]["trade_type"]
+    filas_ves_r = extraer_filas_anuncios(anuncios_ves_r, timestamp_actual, cfg_ves_r["operacion"], cfg_ves_r["trade_type"])
+    resultados["datos"]["ves"]["RECOMPRA"] = filas_ves_r
+    resultados["resumen"]["ves"]["recompras"] = len(filas_ves_r)
+
+    time.sleep(1.5)
+
+    # --- Mercado 2: USD (Zinli) ---
+    # Venta Zinli
+    cfg_zin_v = CONFIG["ZINLI"]["VENTA"]
+    anuncios_zin_v = consultar_anuncios(
+        fiat=cfg_zin_v["fiat"],
+        trade_type=cfg_zin_v["trade_type"],
+        amount=cfg_zin_v["amount"],
+        rows=cfg_zin_v["rows"],
+        pay_types=cfg_zin_v["pay_types"]
     )
-    resultados["datos"]["RECOMPRA"] = filas_recompra
-    resultados["resumen"]["RECOMPRA_count"] = len(filas_recompra)
+    filas_zin_v = extraer_filas_anuncios(anuncios_zin_v, timestamp_actual, cfg_zin_v["operacion"], cfg_zin_v["trade_type"])
+    resultados["datos"]["zinli"]["VENTA"] = filas_zin_v
+    resultados["resumen"]["zinli"]["ventas"] = len(filas_zin_v)
+
+    time.sleep(1.5)
+
+    # Recompra Zinli
+    cfg_zin_r = CONFIG["ZINLI"]["RECOMPRA"]
+    anuncios_zin_r = consultar_anuncios(
+        fiat=cfg_zin_r["fiat"],
+        trade_type=cfg_zin_r["trade_type"],
+        amount=cfg_zin_r["amount"],
+        rows=cfg_zin_r["rows"],
+        pay_types=cfg_zin_r["pay_types"]
+    )
+    filas_zin_r = extraer_filas_anuncios(anuncios_zin_r, timestamp_actual, cfg_zin_r["operacion"], cfg_zin_r["trade_type"])
+    resultados["datos"]["zinli"]["RECOMPRA"] = filas_zin_r
+    resultados["resumen"]["zinli"]["recompras"] = len(filas_zin_r)
 
     return resultados
 
@@ -175,11 +240,13 @@ def ejecutar_captura_local():
     ts = datetime.now(ZoneInfo("America/Caracas")).strftime("%Y-%m-%d %H:%M:%S")
     res = capturar_datos_p2p(ts)
     
-    guardar_csv_local(CONFIG["VENTA"]["filename"], res["datos"]["VENTA"])
-    print(f"[{ts}] Guardados {len(res['datos']['VENTA'])} anuncios en {CONFIG['VENTA']['filename']}")
+    filas_ves = res["datos"]["ves"]["VENTA"] + res["datos"]["ves"]["RECOMPRA"]
+    guardar_csv_local(CONFIG["VES"]["filename"], filas_ves)
+    print(f"[{ts}] Guardados {len(filas_ves)} anuncios VES en {CONFIG['VES']['filename']}")
     
-    guardar_csv_local(CONFIG["RECOMPRA"]["filename"], res["datos"]["RECOMPRA"])
-    print(f"[{ts}] Guardados {len(res['datos']['RECOMPRA'])} anuncios en {CONFIG['RECOMPRA']['filename']}")
+    filas_zinli = res["datos"]["zinli"]["VENTA"] + res["datos"]["zinli"]["RECOMPRA"]
+    guardar_csv_local(CONFIG["ZINLI"]["filename"], filas_zinli)
+    print(f"[{ts}] Guardados {len(filas_zinli)} anuncios Zinli en {CONFIG['ZINLI']['filename']}")
 
 if __name__ == "__main__":
     import sys

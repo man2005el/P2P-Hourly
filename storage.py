@@ -1,8 +1,9 @@
 import os
 import json
 import base64
+import time
 from typing import Dict, Any, List
-from p2p_hourly import COLUMNAS, CONFIG
+from p2p_hourly import COLUMNAS
 
 # Intentar importar gspread y google-auth de forma opcional/defensiva
 try:
@@ -54,10 +55,53 @@ def obtener_cliente_gspread():
 
     return gspread.authorize(creds)
 
-def guardar_en_google_sheets(datos_dict: Dict[str, List[List[Any]]]) -> Dict[str, Any]:
+def guardar_filas_en_hoja(sh, ws_name: str, filas: list) -> dict:
     """
-    Guarda las filas capturadas en Google Sheets en una sola pestaña unificada ("historico_p2p").
-    `datos_dict` contiene las claves 'VENTA' y 'RECOMPRA' con listas de filas.
+    Verifica la existencia de la pestaña ws_name en la hoja de cálculo sh.
+    Si no existe, la crea dinámicamente con las cabeceras de COLUMNAS.
+    Inserta las filas recibidas.
+    """
+    if not filas:
+        return {
+            "status": "skipped",
+            "message": f"No hay filas para guardar en {ws_name}.",
+            "worksheet": ws_name,
+            "filas_insertadas": 0
+        }
+
+    try:
+        try:
+            worksheet = sh.worksheet(ws_name)
+        except gspread.exceptions.WorksheetNotFound:
+            worksheet = sh.add_worksheet(title=ws_name, rows=1000, cols=len(COLUMNAS))
+            worksheet.append_row(COLUMNAS)  # Cabeceras si se crea dinámicamente
+
+        try:
+            primera_celda = worksheet.acell("A1").value
+            if not primera_celda:
+                worksheet.append_row(COLUMNAS)
+        except Exception:
+            pass
+
+        worksheet.append_rows(filas)
+
+        return {
+            "status": "success",
+            "worksheet": ws_name,
+            "filas_insertadas": len(filas)
+        }
+    except Exception as e:
+        return {
+            "status": "error",
+            "worksheet": ws_name,
+            "message": str(e)
+        }
+
+def guardar_en_google_sheets(datos_dict: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Guarda las filas capturadas en Google Sheets en dos pestañas separadas:
+    - 'historico_p2p' para el mercado VES.
+    - 'historico_p2p_zinli' para el mercado Zinli (USD).
     """
     if not GSPREAD_AVAILABLE:
         return {
@@ -74,21 +118,23 @@ def guardar_en_google_sheets(datos_dict: Dict[str, List[List[Any]]]) -> Dict[str
             "message": "No se ha configurado SPREADSHEET_ID ni SPREADSHEET_NAME en las variables de entorno."
         }
 
-    # Concatenar todas las filas de VENTA y RECOMPRA en una sola lista plana
-    filas_totales = []
+    # Organizar filas por mercado
+    filas_ves = []
+    filas_zinli = []
+
     if isinstance(datos_dict, dict):
-        for tipo in ["VENTA", "RECOMPRA"]:
-            filas_totales.extend(datos_dict.get(tipo, []))
-    elif isinstance(datos_dict, list):
-        filas_totales = datos_dict
+        if "ves" in datos_dict and isinstance(datos_dict["ves"], dict):
+            filas_ves.extend(datos_dict["ves"].get("VENTA", []))
+            filas_ves.extend(datos_dict["ves"].get("RECOMPRA", []))
+        
+        if "zinli" in datos_dict and isinstance(datos_dict["zinli"], dict):
+            filas_zinli.extend(datos_dict["zinli"].get("VENTA", []))
+            filas_zinli.extend(datos_dict["zinli"].get("RECOMPRA", []))
 
-    if not filas_totales:
-        return {
-            "status": "skipped",
-            "message": "No hay filas para guardar en Google Sheets."
-        }
-
-    ws_name = "historico_p2p"
+        # Fallback si se pasa formato antiguo {"VENTA": [...], "RECOMPRA": [...]}
+        if not filas_ves and not filas_zinli and ("VENTA" in datos_dict or "RECOMPRA" in datos_dict):
+            filas_ves.extend(datos_dict.get("VENTA", []))
+            filas_ves.extend(datos_dict.get("RECOMPRA", []))
 
     try:
         client = obtener_cliente_gspread()
@@ -97,31 +143,19 @@ def guardar_en_google_sheets(datos_dict: Dict[str, List[List[Any]]]) -> Dict[str
         else:
             sh = client.open(spreadsheet_name)
 
-        # Intentar obtener la pestaña o crearla si no existe
-        try:
-            worksheet = sh.worksheet(ws_name)
-        except gspread.exceptions.WorksheetNotFound:
-            worksheet = sh.add_worksheet(title=ws_name, rows=1000, cols=len(COLUMNAS))
-            worksheet.append_row(COLUMNAS)  # Escribir cabeceras si se crea desde cero
+        res_ves = guardar_filas_en_hoja(sh, "historico_p2p", filas_ves)
+        
+        # Pausa entre operaciones en Google Sheets para prevenir rate limit
+        time.sleep(1.5)
 
-        # Lectura ligera de la celda A1 para verificar cabecera sin traer miles de filas
-        try:
-            primera_celda = worksheet.acell("A1").value
-            if not primera_celda:
-                worksheet.append_row(COLUMNAS)
-        except Exception:
-            pass
-
-        # Inserción eficiente en bloque (una sola llamada HTTP a Google Sheets API)
-        worksheet.append_rows(filas_totales)
+        res_zinli = guardar_filas_en_hoja(sh, "historico_p2p_zinli", filas_zinli)
 
         return {
             "status": "success",
             "message": "Datos guardados exitosamente en Google Sheets.",
             "detalles": {
-                "worksheet": ws_name,
-                "filas_insertadas": len(filas_totales),
-                "status": "success"
+                "historico_p2p": res_ves,
+                "historico_p2p_zinli": res_zinli
             }
         }
 

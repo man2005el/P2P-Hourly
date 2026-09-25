@@ -12,8 +12,8 @@ from storage import guardar_en_google_sheets
 
 app = FastAPI(
     title="Binance P2P Hourly Monitor API",
-    description="API Serverless para monitoreo de arbitraje P2P Binance y persistencia en Google Sheets",
-    version="1.0.0"
+    description="API Serverless para monitoreo de arbitraje P2P Binance (VES y Zinli/USD) y persistencia en Google Sheets",
+    version="2.0.0"
 )
 
 security_bearer = HTTPBearer(auto_error=False)
@@ -64,21 +64,31 @@ def ejecutar_monitoreo(request: Request, authorized: bool = Depends(verificar_cr
     """
     Endpoint principal disparado por cron-job.org.
     Requiere autenticación mediante token.
-    Captura precios de Venta (48k) y Recompra (10k) en Binance P2P y los almacena en Google Sheets.
+    Captura precios de Venta y Recompra en Binance P2P para los mercados VES y Zinli (USD)
+    y los almacena en Google Sheets en sus respectivas pestañas.
     """
     try:
         captura = capturar_datos_p2p()
         sheets_res = guardar_en_google_sheets(captura["datos"])
 
+        resumen = captura.get("resumen", {})
+        ves_resumen = resumen.get("ves", {})
+        zinli_resumen = resumen.get("zinli", {})
+
         return JSONResponse(
             status_code=200,
             content={
                 "status": "success",
-                "path_received": request.url.path,
                 "timestamp": captura["timestamp"],
-                "resumen": captura["resumen"],
-                "almacenamiento": sheets_res,
-                "datos": captura["datos"]
+                "ves": {
+                    "ventas": ves_resumen.get("ventas", 0),
+                    "recompras": ves_resumen.get("recompras", 0)
+                },
+                "zinli": {
+                    "ventas": zinli_resumen.get("ventas", 0),
+                    "recompras": zinli_resumen.get("recompras", 0)
+                },
+                "almacenamiento": sheets_res
             }
         )
     except Exception as e:
